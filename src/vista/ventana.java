@@ -1,7 +1,7 @@
 package vista;
 
+import controlador.logica_ventana;
 import java.awt.*;
-import java.awt.event.*;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -16,13 +16,13 @@ public class ventana extends JFrame {
     private JTextField txt_nombres;
     private JTextField txt_telefono;
     private JTextField txt_email;
-    private JCheckBox chb_favorito;
-    private JComboBox<String> cmb_categoria;
-    private JButton btn_add;
-    private JButton btn_modificar;
-    private JButton btn_eliminar;
-    private JButton btn_exportar;
-    private JTable tabla_contactos;
+    public JCheckBox chb_favorito;
+    public JComboBox<String> cmb_categoria;
+    public JButton btn_add;
+    public JButton btn_modificar;
+    public JButton btn_eliminar;
+    public JButton btn_exportar;
+    public JTable tabla_contactos;
     private DefaultTableModel modeloTabla;
 
     private JComboBox<String> cmb_idiomas; // Selector de idioma
@@ -236,6 +236,10 @@ public class ventana extends JFrame {
         txt_email.setText("");
         cmb_categoria.setSelectedIndex(0);
         chb_favorito.setSelected(false);
+    }
+
+    public void addActionListener(logica_ventana aThis) {
+        throw new UnsupportedOperationException("Not supported yet.");
     }
 
     private static class Contacto {

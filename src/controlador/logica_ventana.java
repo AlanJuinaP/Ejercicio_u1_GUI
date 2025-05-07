@@ -28,7 +28,7 @@ public class logica_ventana implements ActionListener, ItemListener {
         this.delegado = delegado;
 
         // Asignar eventos a botones
-        this.delegado.btn_add.addActionListener(this);
+        this.delegado.addActionListener(this);
         this.delegado.btn_modificar.addActionListener(this);
         this.delegado.btn_eliminar.addActionListener(this);
         this.delegado.btn_exportar.addActionListener(this); // Botón de exportar
