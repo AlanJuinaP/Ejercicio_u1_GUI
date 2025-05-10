@@ -1,121 +1,186 @@
 package controlador;
 
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.event.ItemEvent;
-import java.awt.event.ItemListener;
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-
-import javax.swing.JFileChooser;
-import javax.swing.JOptionPane;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
-
-import vista.ventana;
 import modelo.persona;
 import modelo.personaDAO;
+import vista.ventana;
 
-// Clase logica_ventana que implementa ActionListener e ItemListener.
-public class logica_ventana implements ActionListener, ItemListener {
-    private ventana delegado;
-    private String nombres, email, telefono, categoria = "";
-    private boolean favorito = false;
+/**
+ * Clase logica_ventana que implementa la lógica del controlador.
+ * Maneja validaciones, búsquedas, exportaciones y sincronización con subprocesos.
+ */
+public class logica_ventana {
+    private final ventana delegado; // Referencia a la vista
+    private final personaDAO dao;  // Referencia al modelo
+    private final ExecutorService executorService; // Para manejar subprocesos
 
-    // Constructor
+    // Objeto para sincronización
+    private final Object lock = new Object();
+
+    /**
+     * Constructor de la clase logica_ventana.
+     * @param delegado La referencia a la ventana (vista).
+     */
     public logica_ventana(ventana delegado) {
         this.delegado = delegado;
+        this.dao = new personaDAO();
+        this.executorService = Executors.newCachedThreadPool();
 
-        // Asignar eventos a botones
-        this.delegado.addActionListener(this);
-        this.delegado.btn_modificar.addActionListener(this);
-        this.delegado.btn_eliminar.addActionListener(this);
-        this.delegado.btn_exportar.addActionListener(this); // Botón de exportar
-
-        // Listener para el JComboBox y JCheckBox
-        this.delegado.cmb_categoria.addItemListener(this);
-        this.delegado.chb_favorito.addItemListener(this);
+        // Asignar acciones a los botones de la vista
+        delegado.btn_add.addActionListener(e -> validarYAgregarContacto());
+        delegado.btn_modificar.addActionListener(e -> modificarContacto());
+        delegado.btn_eliminar.addActionListener(e -> eliminarContacto());
+        delegado.btn_exportar.addActionListener(e -> exportarContactos());
     }
 
-    @Override
-    public void actionPerformed(ActionEvent e) {
-        if (e.getSource() == delegado.btn_add) {
-            agregarContacto();
-        } else if (e.getSource() == delegado.btn_modificar) {
-            modificarContacto();
-        } else if (e.getSource() == delegado.btn_eliminar) {
-            eliminarContacto();
-        } else if (e.getSource() == delegado.btn_exportar) {
-            exportarContactosCSV();
+    /**
+     * Valida y agrega un contacto en segundo plano para evitar duplicados.
+     */
+    private void validarYAgregarContacto() {
+        String nombre = delegado.getTxtNombres().getText();
+        String telefono = delegado.getTxtTelefono().getText();
+        String email = delegado.getTxtEmail().getText();
+        String categoria = (String) delegado.getCmbCategoria().getSelectedItem();
+        boolean favorito = delegado.getChbFavorito().isSelected();
+
+        if (nombre.isEmpty() || telefono.isEmpty() || email.isEmpty()) {
+            JOptionPane.showMessageDialog(delegado, "Todos los campos son obligatorios.");
+            return;
         }
-    }
 
-    // Método para exportar contactos a un archivo CSV.
-    private void exportarContactosCSV() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Guardar Contactos como CSV");
-        fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Archivos CSV", "csv"));
+        persona nuevoContacto = new persona(nombre, telefono, email, categoria, favorito);
 
-        int userSelection = fileChooser.showSaveDialog(delegado);
-        if (userSelection == JFileChooser.APPROVE_OPTION) {
-            File archivoSeleccionado = fileChooser.getSelectedFile();
-
-            // Asegurarse de que el archivo tenga extensión .csv
-            String rutaArchivo = archivoSeleccionado.getAbsolutePath();
-            if (!rutaArchivo.endsWith(".csv")) {
-                rutaArchivo += ".csv";
+        // Validar en segundo plano
+        executorService.submit(() -> {
+            synchronized (lock) {
+                boolean duplicado = dao.existeContacto(nuevoContacto);
+                SwingUtilities.invokeLater(() -> {
+                    if (duplicado) {
+                        JOptionPane.showMessageDialog(delegado, "El contacto ya está registrado.");
+                    } else {
+                        dao.guardarContacto(nuevoContacto);
+                        agregarContactoATabla(nuevoContacto);
+                        mostrarNotificacion("Contacto guardado con éxito.");
+                        limpiarFormulario();
+                    }
+                });
             }
-
-            try {
-                // Obtener contactos de la tabla
-                List<persona> contactos = obtenerContactosDesdeTabla();
-
-                // Exportar contactos a CSV
-                new personaDAO(null).exportarCSV(contactos, rutaArchivo);
-                JOptionPane.showMessageDialog(delegado, "Contactos exportados exitosamente a: " + rutaArchivo);
-            } catch (IOException ex) {
-                JOptionPane.showMessageDialog(delegado, "Error al exportar contactos: " + ex.getMessage());
-            }
-        }
+        });
     }
 
-    // Método para obtener contactos visibles en el JTable.
-    private List<persona> obtenerContactosDesdeTabla() {
-        List<persona> contactos = new ArrayList<>();
-        DefaultTableModel modeloTabla = (DefaultTableModel) delegado.tabla_contactos.getModel();
-
-        for (int i = 0; i < modeloTabla.getRowCount(); i++) {
-            String nombre = modeloTabla.getValueAt(i, 0).toString();
-            String telefono = modeloTabla.getValueAt(i, 1).toString();
-            String email = modeloTabla.getValueAt(i, 2).toString();
-            String categoria = modeloTabla.getValueAt(i, 3).toString();
-            boolean favorito = modeloTabla.getValueAt(i, 4).toString().equals("Sí");
-
-            contactos.add(new persona(nombre, telefono, email, categoria, favorito));
-        }
-        return contactos;
-    }
-
-    // Métodos para agregar, modificar y eliminar contactos (ya implementados previamente).
-    private void agregarContacto() {
-        // Implementación existente
-    }
-
+    /**
+     * Modifica el contacto seleccionado en la tabla.
+     */
     private void modificarContacto() {
-        // Implementación existente
-    }
-
-    private void eliminarContacto() {
-        // Implementación existente
-    }
-
-    @Override
-    public void itemStateChanged(ItemEvent e) {
-        if (e.getSource() == delegado.cmb_categoria) {
-            categoria = delegado.cmb_categoria.getSelectedItem().toString();
-        } else if (e.getSource() == delegado.chb_favorito) {
-            favorito = delegado.chb_favorito.isSelected();
+        int filaSeleccionada = delegado.getTablaContactos().getSelectedRow();
+        if (filaSeleccionada == -1) {
+            JOptionPane.showMessageDialog(delegado, "Seleccione un contacto para modificar.");
+            return;
         }
+
+        String nombre = delegado.getTxtNombres().getText();
+        String telefono = delegado.getTxtTelefono().getText();
+        String email = delegado.getTxtEmail().getText();
+        String categoria = (String) delegado.getCmbCategoria().getSelectedItem();
+        boolean favorito = delegado.getChbFavorito().isSelected();
+
+        if (nombre.isEmpty() || telefono.isEmpty() || email.isEmpty()) {
+            JOptionPane.showMessageDialog(delegado, "Todos los campos son obligatorios.");
+            return;
+        }
+
+        persona contactoModificado = new persona(nombre, telefono, email, categoria, favorito);
+
+        synchronized (lock) {
+            dao.modificarContacto(contactoModificado);
+            actualizarContactoEnTabla(filaSeleccionada, contactoModificado);
+            mostrarNotificacion("Contacto modificado con éxito.");
+            limpiarFormulario();
+        }
+    }
+
+    /**
+     * Elimina el contacto seleccionado en la tabla.
+     */
+    private void eliminarContacto() {
+        int filaSeleccionada = delegado.getTablaContactos().getSelectedRow();
+        if (filaSeleccionada == -1) {
+            JOptionPane.showMessageDialog(delegado, "Seleccione un contacto para eliminar.");
+            return;
+        }
+
+        synchronized (lock) {
+            dao.eliminarContacto(filaSeleccionada);
+            DefaultTableModel modelo = delegado.getModeloTabla();
+            modelo.removeRow(filaSeleccionada);
+            mostrarNotificacion("Contacto eliminado con éxito.");
+        }
+    }
+
+    /**
+     * Exporta los contactos a un archivo CSV en segundo plano.
+     */
+    private void exportarContactos() {
+        executorService.submit(() -> {
+            synchronized (lock) {
+                try {
+                    dao.exportarCSV("contactos.csv");
+                    SwingUtilities.invokeLater(() -> mostrarNotificacion("Exportación completada con éxito."));
+                } catch (Exception e) {
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(delegado, "Error al exportar contactos."));
+                }
+            }
+        });
+    }
+
+    /**
+     * Agrega un contacto a la tabla de la interfaz gráfica.
+     * @param contacto El contacto a agregar.
+     */
+    private void agregarContactoATabla(persona contacto) {
+        DefaultTableModel modelo = delegado.getModeloTabla();
+        modelo.addRow(new Object[]{
+                contacto.getNombre(),
+                contacto.getTelefono(),
+                contacto.getEmail(),
+                contacto.getCategoria(),
+                contacto.isFavorito() ? "Sí" : "No"
+        });
+    }
+
+    /**
+     * Actualiza un contacto en la tabla de la interfaz gráfica.
+     * @param fila La fila seleccionada.
+     * @param contacto El contacto modificado.
+     */
+    private void actualizarContactoEnTabla(int fila, persona contacto) {
+        DefaultTableModel modelo = delegado.getModeloTabla();
+        modelo.setValueAt(contacto.getNombre(), fila, 0);
+        modelo.setValueAt(contacto.getTelefono(), fila, 1);
+        modelo.setValueAt(contacto.getEmail(), fila, 2);
+        modelo.setValueAt(contacto.getCategoria(), fila, 3);
+        modelo.setValueAt(contacto.isFavorito() ? "Sí" : "No", fila, 4);
+    }
+
+    /**
+     * Muestra una notificación en la interfaz gráfica.
+     * @param mensaje El mensaje de la notificación.
+     */
+    private void mostrarNotificacion(String mensaje) {
+        JOptionPane.showMessageDialog(delegado, mensaje);
+    }
+
+    /**
+     * Limpia el formulario de entrada en la interfaz gráfica.
+     */
+    private void limpiarFormulario() {
+        delegado.getTxtNombres().setText("");
+        delegado.getTxtTelefono().setText("");
+        delegado.getTxtEmail().setText("");
+        delegado.getCmbCategoria().setSelectedIndex(0);
+        delegado.getChbFavorito().setSelected(false);
     }
 }
