@@ -1,5 +1,6 @@
 package controlador;
 
+import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import javax.swing.*;
@@ -9,35 +10,49 @@ import modelo.personaDAO;
 import vista.ventana;
 
 /**
- * Clase logica_ventana que implementa la lógica del controlador.
- * Maneja validaciones, búsquedas, exportaciones y sincronización con subprocesos.
+ * Clase que contiene la lógica de interacción entre la ventana y el modelo.
  */
 public class logica_ventana {
-    private final ventana delegado; // Referencia a la vista
-    private final personaDAO dao;  // Referencia al modelo
-    private final ExecutorService executorService; // Para manejar subprocesos
-
-    // Objeto para sincronización
-    private final Object lock = new Object();
+    private final ventana delegado;              // Referencia a la ventana principal
+    private final personaDAO dao;                // Referencia al DAO de persona
+    private final ExecutorService executorService = Executors.newCachedThreadPool(); // Pool para tareas de fondo
+    private final Object lock = new Object();    // Objeto para sincronización
 
     /**
-     * Constructor de la clase logica_ventana.
-     * @param delegado La referencia a la ventana (vista).
+     * Constructor: inicializa la lógica y vincula los listeners de los botones.
      */
-    public logica_ventana(ventana delegado) {
-        this.delegado = delegado;
+    public logica_ventana(ventana ventana) {
+        this.delegado = ventana;
         this.dao = new personaDAO();
-        this.executorService = Executors.newCachedThreadPool();
+        cargarContactosEnTabla();
 
-        // Asignar acciones a los botones de la vista
-        delegado.btn_add.addActionListener(e -> validarYAgregarContacto());
-        delegado.btn_modificar.addActionListener(e -> modificarContacto());
-        delegado.btn_eliminar.addActionListener(e -> eliminarContacto());
-        delegado.btn_exportar.addActionListener(e -> exportarContactos());
+        // Listeners de los botones
+        delegado.getBtnAdd().addActionListener(e -> validarYAgregarContacto());
+        delegado.getBtnModificar().addActionListener(e -> modificarContacto());
+        delegado.getBtnEliminar().addActionListener(e -> eliminarContacto());
+        delegado.getBtnExportar().addActionListener(e -> exportarContactosJSON());
+        delegado.getBtnImportar().addActionListener(e -> importarContactosJSON());
     }
 
     /**
-     * Valida y agrega un contacto en segundo plano para evitar duplicados.
+     * Llena la tabla de la ventana con los contactos actuales.
+     */
+    private void cargarContactosEnTabla() {
+        DefaultTableModel modelo = delegado.getModeloTabla();
+        modelo.setRowCount(0); // Limpia la tabla primero
+        for (persona contacto : dao.getContactos()) {
+            modelo.addRow(new Object[]{
+                contacto.getNombre(),
+                contacto.getTelefono(),
+                contacto.getEmail(),
+                contacto.getCategoria(),
+                contacto.isFavorito() ? "Sí" : "No"
+            });
+        }
+    }
+
+    /**
+     * Valida y agrega un nuevo contacto en un hilo aparte.
      */
     private void validarYAgregarContacto() {
         String nombre = delegado.getTxtNombres().getText();
@@ -53,7 +68,6 @@ public class logica_ventana {
 
         persona nuevoContacto = new persona(nombre, telefono, email, categoria, favorito);
 
-        // Validar en segundo plano
         executorService.submit(() -> {
             synchronized (lock) {
                 boolean duplicado = dao.existeContacto(nuevoContacto);
@@ -95,7 +109,7 @@ public class logica_ventana {
         persona contactoModificado = new persona(nombre, telefono, email, categoria, favorito);
 
         synchronized (lock) {
-            dao.modificarContacto(contactoModificado);
+            dao.modificarContacto(filaSeleccionada, contactoModificado);
             actualizarContactoEnTabla(filaSeleccionada, contactoModificado);
             mostrarNotificacion("Contacto modificado con éxito.");
             limpiarFormulario();
@@ -103,7 +117,7 @@ public class logica_ventana {
     }
 
     /**
-     * Elimina el contacto seleccionado en la tabla.
+     * Elimina el contacto seleccionado de la tabla y la lista.
      */
     private void eliminarContacto() {
         int filaSeleccionada = delegado.getTablaContactos().getSelectedRow();
@@ -121,40 +135,56 @@ public class logica_ventana {
     }
 
     /**
-     * Exporta los contactos a un archivo CSV en segundo plano.
+     * Exporta los contactos a un archivo JSON.
      */
-    private void exportarContactos() {
+    private void exportarContactosJSON() {
         executorService.submit(() -> {
             synchronized (lock) {
                 try {
-                    dao.exportarCSV("contactos.csv");
-                    SwingUtilities.invokeLater(() -> mostrarNotificacion("Exportación completada con éxito."));
-                } catch (Exception e) {
-                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(delegado, "Error al exportar contactos."));
+                    dao.exportarContactosJSON("contactos.json");
+                    SwingUtilities.invokeLater(() -> mostrarNotificacion("Exportación JSON completada con éxito."));
+                } catch (IOException e) {
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(delegado, "Error al exportar contactos a JSON."));
                 }
             }
         });
     }
 
     /**
-     * Agrega un contacto a la tabla de la interfaz gráfica.
-     * @param contacto El contacto a agregar.
+     * Importa contactos desde un archivo JSON.
      */
-    private void agregarContactoATabla(persona contacto) {
-        DefaultTableModel modelo = delegado.getModeloTabla();
-        modelo.addRow(new Object[]{
-                contacto.getNombre(),
-                contacto.getTelefono(),
-                contacto.getEmail(),
-                contacto.getCategoria(),
-                contacto.isFavorito() ? "Sí" : "No"
+    private void importarContactosJSON() {
+        executorService.submit(() -> {
+            synchronized (lock) {
+                try {
+                    dao.importarContactosJSON("contactos.json");
+                    SwingUtilities.invokeLater(() -> {
+                        cargarContactosEnTabla();
+                        mostrarNotificacion("Importación JSON completada con éxito.");
+                    });
+                } catch (IOException e) {
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(delegado, "Error al importar contactos desde JSON."));
+                }
+            }
         });
     }
 
     /**
-     * Actualiza un contacto en la tabla de la interfaz gráfica.
-     * @param fila La fila seleccionada.
-     * @param contacto El contacto modificado.
+     * Agrega un contacto a la tabla de la interfaz.
+     */
+    private void agregarContactoATabla(persona contacto) {
+        DefaultTableModel modelo = delegado.getModeloTabla();
+        modelo.addRow(new Object[]{
+            contacto.getNombre(),
+            contacto.getTelefono(),
+            contacto.getEmail(),
+            contacto.getCategoria(),
+            contacto.isFavorito() ? "Sí" : "No"
+        });
+    }
+
+    /**
+     * Actualiza un contacto en la tabla de la interfaz.
      */
     private void actualizarContactoEnTabla(int fila, persona contacto) {
         DefaultTableModel modelo = delegado.getModeloTabla();
@@ -166,15 +196,14 @@ public class logica_ventana {
     }
 
     /**
-     * Muestra una notificación en la interfaz gráfica.
-     * @param mensaje El mensaje de la notificación.
+     * Muestra una notificación simple.
      */
     private void mostrarNotificacion(String mensaje) {
         JOptionPane.showMessageDialog(delegado, mensaje);
     }
 
     /**
-     * Limpia el formulario de entrada en la interfaz gráfica.
+     * Limpia los campos del formulario.
      */
     private void limpiarFormulario() {
         delegado.getTxtNombres().setText("");
